@@ -374,3 +374,79 @@ class TagMappingImport(CKANBasedImport):
 # Define which class should be used for import, CUDC will use it as an entrypoint
 DefaultImportClass = TagMappingImport
 ```
+
+### Import with additional data from other API (Data Quality)
+> See [access-other-api-data-quality.py](./access-other-api-data-quality.py)
+
+> When doing Python imports, please ensure the import statements are within the method.
+
+This example includes accessing additional data from another API and adding it to the package.
+
+We override the `iterate_imports` method to include the quality of the package.
+
+```py
+from ckanext.udc_import_other_portals.logic import CKANBasedImport
+
+
+class DataQualityAPI(CKANBasedImport):
+
+    def iterate_imports(self):
+        """
+        Override the default iterate_imports to include the quality of the package.
+        """
+        import requests
+
+        for package in self.all_packages:
+            # Get the quality of the package
+            quality_data = (
+                requests.get(
+                    f"{self.base_api}/3/action/quality_show?package_id={package['id']}"
+                )
+                .json()
+                .get("result")
+            )
+            
+            # Add the quality to the package, we can then use this in the `map_to_cudc_package`
+            if len(quality_data) > 0:
+                package["quality"] = quality_data[0]
+
+            yield package
+
+    def map_to_cudc_package(self, src: dict, target: dict):
+        """
+        Map source package to cudc package.
+
+        Args:
+            src (dict): The source package that needs to be mapped.
+            target (dict): The target package that imports into CUDC.
+        """
+        # Adding a prefix to the name to avoid potential collisions
+        target["name"] = "city-toronto-" + src["name"]
+        target["id"] = src["id"]
+        target["title"] = src["title"]
+
+        # Quality
+        if src.get("quality"):
+            score = src["quality"].get("score")
+            grade = src["quality"].get("grade")
+            recorded_at = src["quality"].get("recorded_at")
+            
+            if src.get("is_retired"):
+                target["quality_annotation"] = (
+                    "This dataset is retired. Its Data Quality Score will not "
+                    "be calculated. The last recorded Data Quality Score was "
+                    f"{float(score) * 100}% ({grade}) on {recorded_at}."
+                )
+            else:
+                target["quality_annotation"] = (
+                    f"Data Quality Score: {float(score) * 100}% ({grade}) as of {recorded_at}"
+                )
+            target["quality_dimension_metric"] = (
+                "Data Quality is provided by the City of Toronto"
+            )
+            
+        return target
+
+# Define which class should be used for import, CUDC will use it as an entrypoint
+DefaultImportClass = DataQualityAPI
+```
